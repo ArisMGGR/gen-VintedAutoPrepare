@@ -1,0 +1,39 @@
+name: Windows build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the .exe (same script you run locally)
+        shell: cmd
+        run: build_windows.bat
+
+      - name: Run tests
+        shell: cmd
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: .venv\Scripts\python -m pytest -q
+
+      - name: Self-test the built .exe
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\VintedAutoPrepare.exe -ArgumentList "--selftest" -Wait -PassThru
+          Get-Content "$env:APPDATA\VintedAutoPrepare\app.log" -Tail 5
+          if ($p.ExitCode -ne 0) { throw "Self-test failed with exit code $($p.ExitCode)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VintedAutoPrepare-windows
+          path: dist/VintedAutoPrepare.exe

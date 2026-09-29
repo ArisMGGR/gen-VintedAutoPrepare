@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+import logging
+import sys
+import traceback
+from pathlib import Path
+
+from vinted_prep import APP_NAME
+from vinted_prep.config import Settings, app_data_dir
+
+
+def _setup_logging() -> None:
+    handlers: list[logging.Handler] = [logging.FileHandler(app_data_dir() / "app.log", encoding="utf-8")]
+    if sys.stderr:  # None in the windowed .exe
+        handlers.append(logging.StreamHandler())
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", handlers=handlers)
+
+
+def resource_path(relative: str) -> Path:
+    """Files bundled by PyInstaller live under sys._MEIPASS; in development, next to the package."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base / relative
+
+
+def selftest() -> int:
+    """Checks the bundled libraries load and the photo pipeline runs (used by CI on the built .exe)."""
+    import numpy as np
+    import onnxruntime
+    import pillow_heif  # noqa: F401
+    from PySide6.QtWidgets import QApplication
+
+    from vinted_prep.imaging.crop import apply_crop, compute_crop_box
+    from vinted_prep.imaging.detect import detect_classic
+    from vinted_prep.imaging.enhance import enhance
+
+    app = QApplication.instance() or QApplication(["selftest", "-platform", "offscreen"])
+    img = np.full((600, 800, 3), 210, np.uint8)
+    img[150:450, 450:650] = (170, 30, 40)
+    img = enhance(img)
+    box = compute_crop_box(detect_classic(img), 800, 600)
+    out = apply_crop(img, box)
+    ok = abs(out.shape[1] / out.shape[0] - 0.8) < 0.01 and resource_path("assets/icon.png").exists()
+    logging.info("selftest %s; onnxruntime providers: %s", "ok" if ok else "FAILED", onnxruntime.get_available_providers())
+    del app
+    return 0 if ok else 1
+
+
+def main() -> int:
+    _setup_logging()
+    if "--selftest" in sys.argv:
+        return selftest()
+    from PySide6.QtGui import QIcon
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    from vinted_prep.ui.main_window import MainWindow
+
+    app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setStyle("Fusion")
+    app.setWindowIcon(QIcon(str(resource_path("assets/icon.png"))))
+
+    def excepthook(exc_type, exc, tb):
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+        logging.error("Unhandled error:\n%s", text)
+        QMessageBox.critical(None, "Unexpected error", f"{exc}\n\nDetails were written to {app_data_dir() / 'app.log'}")
+
+    sys.excepthook = excepthook
+
+    window = MainWindow(Settings.load())
+    window.show()
+    return app.exec()
