@@ -29,8 +29,12 @@ echo Updating pip ...
 echo Installing requirements (this can take a few minutes the first time) ...
 ".venv\Scripts\python.exe" -m pip install --upgrade -r requirements.txt || goto :fail
 
+echo Creating the "VintedAutoPrepare" shortcut ...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\make_shortcut.ps1" || goto :fail
+
 echo.
-echo Done! Double-click "Start VintedAutoPrepare.bat" to open the program.
+echo Done! Double-click the "VintedAutoPrepare" shortcut in this folder to open the program.
+echo (Tip: copy or drag it to your Desktop or Start menu.)
 if not defined CI pause
 exit /b 0
 

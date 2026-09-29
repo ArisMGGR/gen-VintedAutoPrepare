@@ -26,6 +26,17 @@ jobs:
           call Install.bat || exit /b 1
           .venv\Scripts\python run.py --selftest
 
+      - name: Shortcut created by Install.bat points at the app
+        shell: pwsh
+        run: |
+          $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$PWD\VintedAutoPrepare.lnk")
+          "Target: $($lnk.TargetPath)  Args: $($lnk.Arguments)  Dir: $($lnk.WorkingDirectory)  Icon: $($lnk.IconLocation)"
+          if (-not (Test-Path "$PWD\VintedAutoPrepare.lnk")) { throw "shortcut missing" }
+          if (-not (Test-Path $lnk.TargetPath)) { throw "shortcut target missing" }
+          if (-not (Test-Path $lnk.Arguments.Trim('"'))) { throw "run.py path wrong" }
+          $p = Start-Process -FilePath $lnk.TargetPath -ArgumentList "$($lnk.Arguments) --selftest" -WorkingDirectory $lnk.WorkingDirectory -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "app launched via shortcut failed self-test" }
+
       - name: Run tests
         shell: cmd
         env:
