@@ -28,13 +28,13 @@ Windows SmartScreen may warn because the exe isn't signed: *More info → Run an
 Install [Python 3.11+](https://www.python.org/downloads/) (tick *Add python.exe to PATH*),
 then double-click `build_windows.bat`. The result is `dist\VintedAutoPrepare.exe`.
 
-**Option C – run from source**
+**Option C – run from source (two double-clicks)**
+Install [Python 3.11+](https://www.python.org/downloads/) (tick *Add python.exe to PATH*), then in the project folder:
 
-```bat
-python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
-.venv\Scripts\python run.py
-```
+1. Double-click **`Install.bat`**. It creates the `.venv` folder, updates pip and installs the
+   requirements. Run it again at any time to update them.
+2. Double-click **`Start VintedAutoPrepare.bat`** to open the program. Right-click it →
+   *Send to → Desktop (create shortcut)* if you want it on your desktop.
 
 > The first time photos are processed, the app downloads its item-detection model
 > (~170 MB, once) to `%APPDATA%\VintedAutoPrepare\models`. If that's not possible, it

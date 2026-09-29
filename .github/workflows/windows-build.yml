@@ -20,6 +20,12 @@ jobs:
         shell: cmd
         run: build_windows.bat
 
+      - name: Install.bat works and the installed app starts
+        shell: cmd
+        run: |
+          call Install.bat || exit /b 1
+          .venv\Scripts\python run.py --selftest
+
       - name: Run tests
         shell: cmd
         env:
