@@ -115,18 +115,45 @@ def test_gemini_ignores_thought_parts():
     assert GeminiProvider("K", "m", FakeSession(resp)).analyze(["A"], "", "Greek").title == GOOD["title"]
 
 
-def test_gemini_retries_then_reports_quota():
-    quota = FakeResponse(429, {"error": {"message": "Resource exhausted"}})
-    session = FakeSession(quota, quota, quota)
-    with pytest.raises(AIError, match="limit"):
-        GeminiProvider("K", "m", session, retry_wait=0).analyze(["A"], "", "Greek")
-    assert len(session.calls) == 3
+def _models_called(session):
+    return [url.split("/models/")[1].split(":")[0] for _, url, _ in session.calls]
 
 
 def test_gemini_retry_succeeds():
     busy = FakeResponse(503, {"error": {"message": "overloaded"}})
     session = FakeSession(busy, gemini_ok(json.dumps(GOOD)))
-    assert GeminiProvider("K", "m", session, retry_wait=0).analyze(["A"], "", "Greek").brand == "Zara"
+    provider = GeminiProvider("K", "m", session, retry_wait=0)
+    messages = []
+    provider.progress = messages.append
+    assert provider.analyze(["A"], "", "Greek").brand == "Zara"
+    assert _models_called(session) == ["m", "m"] and provider.used_model == "m"
+    assert any("busy" in m for m in messages)
+
+
+def test_gemini_falls_back_to_next_model_when_overloaded():
+    busy = FakeResponse(503, {"error": {"message": "This model is currently experiencing high demand."}})
+    missing = FakeResponse(404, {"error": {"message": "not found"}})
+    session = FakeSession(busy, busy, busy, missing, gemini_ok(json.dumps(GOOD)))
+    provider = GeminiProvider("K", "main", session, retry_wait=0, fallback_models=["gone", "backup"])
+    assert provider.analyze(["A"], "", "Greek").brand == "Zara"
+    assert _models_called(session) == ["main", "main", "main", "gone", "backup"]
+    assert provider.used_model == "backup"
+
+
+def test_gemini_all_overloaded_gives_friendly_error():
+    busy = FakeResponse(503, {"error": {"message": "high demand"}})
+    session = FakeSession(*[busy] * 5)
+    with pytest.raises(AIError, match="overloaded right now.*Ollama"):
+        GeminiProvider("K", "main", session, retry_wait=0, fallback_models=["backup"]).analyze(["A"], "", "Greek")
+    assert _models_called(session) == ["main"] * 3 + ["backup"] * 2
+
+
+def test_gemini_quota_skips_to_next_model_then_reports():
+    quota = FakeResponse(429, {"error": {"message": "Resource exhausted"}})
+    session = FakeSession(quota, quota)
+    with pytest.raises(AIError, match="limit"):
+        GeminiProvider("K", "main", session, retry_wait=0, fallback_models=["backup"]).analyze(["A"], "", "Greek")
+    assert _models_called(session) == ["main", "backup"]
 
 
 def test_gemini_errors():
@@ -137,7 +164,9 @@ def test_gemini_errors():
         GeminiProvider("K", "m", FakeSession(bad_key)).analyze(["A"], "", "Greek")
     missing = FakeResponse(404, {"error": {"message": "not found"}})
     with pytest.raises(AIError, match="Refresh"):
-        GeminiProvider("K", "m", FakeSession(missing)).analyze(["A"], "", "Greek")
+        GeminiProvider("K", "m", FakeSession(missing), fallback_models=[]).analyze(["A"], "", "Greek")
+    with pytest.raises(AIError, match="Refresh"):
+        GeminiProvider("K", "m", FakeSession(missing, missing), fallback_models=["x"]).analyze(["A"], "", "Greek")
 
 
 def test_gemini_list_models_filters_and_sorts():

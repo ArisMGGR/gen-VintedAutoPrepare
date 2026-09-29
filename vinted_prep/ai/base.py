@@ -11,6 +11,7 @@ class AIError(RuntimeError):
 
 class Provider(ABC):
     name = "provider"
+    progress = staticmethod(lambda msg: None)  # the caller may replace it to show status updates
 
     @abstractmethod
     def analyze(self, images_b64: list[str], notes: str, language: str) -> Listing:

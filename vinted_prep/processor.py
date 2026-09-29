@@ -67,7 +67,8 @@ class Processor:
         item.photos[index] = result
         save_item(item)
 
-    def run_ai(self, item: Item, progress: Progress) -> None:
+    def run_ai(self, item: Item, progress: Progress) -> str:
+        """Writes item.listing; returns a note for the status line ('' if nothing to add)."""
         photos = [p.output for p in item.photos if p.output and p.output.exists()]
         if not photos:
             raise RuntimeError("Process the photos first.")
@@ -76,8 +77,13 @@ class Processor:
         images = [to_jpeg_b64(load_rgb(p), max_side=max_side) for p in chosen]
         self._check_cancel()
         provider = get_provider(self.settings)
+        provider.progress = progress
         progress(f"Asking {provider.name} to write the listing ({len(images)} photos)...")
         item.listing = provider.analyze(images, item.notes, self.settings.language)
+        used = getattr(provider, "used_model", "")
+        if used and used != getattr(provider, "model", used):
+            return f" (written by {used}: {provider.model} was busy)"
+        return ""
 
     def process(self, item: Item, progress: Progress, photos: bool = True, ai: bool = True) -> None:
         """Runs the requested steps and always leaves item.status/message set."""
@@ -87,10 +93,11 @@ class Processor:
             if photos:
                 self.process_photos(item, progress)
                 save_item(item)
+            note = ""
             if ai:
-                self.run_ai(item, progress)
+                note = self.run_ai(item, progress)
                 save_item(item)
-            item.status, item.message = Status.DONE, "Ready"
+            item.status, item.message = Status.DONE, "Ready" + note
         except Cancelled:
             item.status, item.message = Status.PENDING, "Stopped"
         except AIError as exc:
