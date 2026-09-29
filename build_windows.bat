@@ -4,10 +4,10 @@ REM Requires Python 3.11+ from python.org (tick "Add python.exe to PATH" when in
 setlocal
 cd /d "%~dp0"
 
-if not exist .venv (
-    python -m venv .venv || goto :error
+if not exist venv (
+    python -m venv venv || goto :error
 )
-call .venv\Scripts\activate.bat || goto :error
+call venv\Scripts\activate.bat || goto :error
 python -m pip install --upgrade pip || goto :error
 pip install -r requirements-dev.txt || goto :error
 

@@ -24,7 +24,7 @@ jobs:
         shell: cmd
         run: |
           call Install.bat || exit /b 1
-          .venv\Scripts\python run.py --selftest
+          venv\Scripts\python run.py --selftest
 
       - name: Shortcut created by Install.bat points at the app
         shell: pwsh
@@ -41,7 +41,7 @@ jobs:
         shell: cmd
         env:
           QT_QPA_PLATFORM: offscreen
-        run: .venv\Scripts\python -m pytest -q
+        run: venv\Scripts\python -m pytest -q
 
       - name: Self-test the built .exe
         shell: pwsh
