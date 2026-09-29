@@ -1,5 +1,5 @@
 @echo off
-REM Double-click to set up VintedAutoPrepare: creates the .venv folder, updates pip
+REM Double-click to set up VintedAutoPrepare: creates the venv folder, updates pip
 REM and installs the requirements. Safe to run again to update everything.
 setlocal
 cd /d "%~dp0"
@@ -18,16 +18,16 @@ if not defined PY (
     goto :fail
 )
 
-if not exist ".venv\Scripts\python.exe" (
-    echo Creating virtual environment in .venv ...
-    %PY% -m venv .venv || goto :fail
+if not exist "venv\Scripts\python.exe" (
+    echo Creating virtual environment in venv ...
+    %PY% -m venv venv || goto :fail
 )
 
 echo Updating pip ...
-".venv\Scripts\python.exe" -m pip install --upgrade pip || goto :fail
+"venv\Scripts\python.exe" -m pip install --upgrade pip || goto :fail
 
 echo Installing requirements (this can take a few minutes the first time) ...
-".venv\Scripts\python.exe" -m pip install --upgrade -r requirements.txt || goto :fail
+"venv\Scripts\python.exe" -m pip install --upgrade -r requirements.txt || goto :fail
 
 echo Creating the "VintedAutoPrepare" shortcut ...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\make_shortcut.ps1" || goto :fail

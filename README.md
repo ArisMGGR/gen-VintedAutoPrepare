@@ -31,7 +31,7 @@ then double-click `build_windows.bat`. The result is `dist\VintedAutoPrepare.exe
 **Option C – run from source (two double-clicks)**
 Install [Python 3.11+](https://www.python.org/downloads/) (tick *Add python.exe to PATH*), then in the project folder:
 
-1. Double-click **`Install.bat`**. It creates the `.venv` folder, updates pip, installs the
+1. Double-click **`Install.bat`**. It creates the `venv` folder, updates pip, installs the
    requirements and creates a **`VintedAutoPrepare`** shortcut in the project folder.
    Run it again at any time to update everything (or if you move the folder).
 2. Double-click the **`VintedAutoPrepare`** shortcut to open the program. You can copy it to
