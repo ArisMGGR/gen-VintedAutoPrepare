@@ -36,6 +36,10 @@ jobs:
           if (-not (Test-Path $lnk.Arguments.Trim('"'))) { throw "run.py path wrong" }
           $p = Start-Process -FilePath $lnk.TargetPath -ArgumentList "$($lnk.Arguments) --selftest" -WorkingDirectory $lnk.WorkingDirectory -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "app launched via shortcut failed self-test" }
+          $item = (New-Object -ComObject Shell.Application).NameSpace("$PWD").ParseName("VintedAutoPrepare.lnk")
+          $id = $item.ExtendedProperty("System.AppUserModel.ID")
+          "Shortcut AppUserModelID: $id"
+          if ($id -ne "ArisMGGR.VintedAutoPrepare") { throw "shortcut has no taskbar app ID" }
 
       - name: Run tests
         shell: cmd
