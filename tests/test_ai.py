@@ -97,7 +97,10 @@ class FakeSession:
 
     def post(self, url, **kw):
         self.calls.append(("POST", url, kw))
-        return self.responses.pop(0)
+        resp = self.responses.pop(0)
+        if isinstance(resp, Exception):
+            raise resp
+        return resp
 
     def get(self, url, **kw):
         self.calls.append(("GET", url, kw))
@@ -150,6 +153,24 @@ def test_gemini_falls_back_to_next_model_when_overloaded():
     assert provider.analyze(["A"], "", "Greek").brand == "Zara"
     assert _models_called(session) == ["main", "main", "main", "gone", "backup"]
     assert provider.used_model == "backup" and provider.skip_reason == "was busy"
+
+
+def test_gemini_hung_model_skips_to_next_model():
+    import requests
+
+    session = FakeSession(requests.ReadTimeout("read timed out"), gemini_ok(json.dumps(GOOD)))
+    provider = GeminiProvider("K", "main", session, retry_wait=0, fallback_models=["backup"])
+    assert provider.analyze(["A"], "", "Greek").brand == "Zara"
+    assert _models_called(session) == ["main", "backup"]  # no retries on the hung model
+    assert provider.skip_reason == "was busy"
+
+
+def test_gemini_offline_is_a_connection_error():
+    import requests
+
+    session = FakeSession(requests.ConnectionError("no route"))
+    with pytest.raises(AIError, match="internet connection"):
+        GeminiProvider("K", "main", session, retry_wait=0, fallback_models=["backup"]).analyze(["A"], "", "Greek")
 
 
 def test_gemini_missing_model_reason_is_not_busy():

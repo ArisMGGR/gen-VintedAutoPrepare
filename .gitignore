@@ -34,6 +34,7 @@ settings.json.unreadable
 *.tiff
 listing.txt
 listing.json
+output/
 
 # Machine-specific shortcut (tools/make_shortcut.ps1 writes absolute paths)
 VintedAutoPrepare.lnk

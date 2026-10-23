@@ -90,7 +90,8 @@ Tips:
 
 ## 4. Output
 
-Results go to `Documents\VintedAutoPrepare\<item folder name>\` (changeable in Settings):
+Results go to `output\<item folder name>\` inside the project folder (`Documents\VintedAutoPrepare\` for the
+packaged .exe), changeable in Settings:
 
 ```
 01.jpg 02.jpg …   processed photos, original order, location data (EXIF) removed

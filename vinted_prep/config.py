@@ -45,6 +45,9 @@ def app_data_dir() -> Path:
 
 
 def default_output_dir() -> Path:
+    """An 'output' folder in the project when run from source; Documents for the packaged app."""
+    if not getattr(sys, "frozen", False):
+        return Path(__file__).resolve().parent.parent / "output"
     docs = Path.home() / "Documents"
     return (docs if docs.exists() else Path.home()) / APP_NAME
 

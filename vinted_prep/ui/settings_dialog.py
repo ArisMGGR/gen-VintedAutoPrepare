@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 from vinted_prep.ai import AIError
 from vinted_prep.ai.gemini import KEY_URL, GeminiProvider
 from vinted_prep.ai.ollama import DOWNLOAD_URL, OllamaProvider
-from vinted_prep.config import Settings
+from vinted_prep.config import Settings, default_output_dir
 
 PROVIDERS = [("gemini", "Google Gemini — free tier, online"), ("ollama", "Ollama — free, offline on your PC")]
 
@@ -227,5 +227,6 @@ class SettingsDialog(QDialog):
         s.auto_enhance = self.enhance.isChecked()
         s.enhance_strength = self.strength.value() / 100
         s.crop_margin = self.margin.value() / 100
-        s.output_dir = self.output_dir.text().strip()
+        out = self.output_dir.text().strip()
+        s.output_dir = "" if out == str(default_output_dir()) else out  # "" keeps following the default
         super().accept()
