@@ -21,7 +21,7 @@ You review everything, edit if needed, and paste it into Vinted with the **Copy*
 
 **Option A – download the .exe**
 Every push builds `VintedAutoPrepare.exe` on GitHub: open the repository's **Actions** tab →
-latest *Windows build* run → download the `VintedAutoPrepare-windows` artifact and unzip it.
+latest *Windows build* run for a `v*` tag (or start one with *Run workflow*) → download the `VintedAutoPrepare-windows` artifact and unzip it.
 Windows SmartScreen may warn because the exe isn't signed: *More info → Run anyway*.
 
 **Option B – build it yourself**
