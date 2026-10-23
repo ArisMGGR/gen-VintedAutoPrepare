@@ -1,0 +1,60 @@
+name: Windows build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the .exe (same script you run locally)
+        shell: cmd
+        run: build_windows.bat
+
+      - name: Install.bat works and the installed app starts
+        shell: cmd
+        run: |
+          call Install.bat || exit /b 1
+          venv\Scripts\python run.py --selftest
+
+      - name: Shortcut created by Install.bat points at the app
+        shell: pwsh
+        run: |
+          $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$PWD\VintedAutoPrepare.lnk")
+          "Target: $($lnk.TargetPath)  Args: $($lnk.Arguments)  Dir: $($lnk.WorkingDirectory)  Icon: $($lnk.IconLocation)"
+          if (-not (Test-Path "$PWD\VintedAutoPrepare.lnk")) { throw "shortcut missing" }
+          if (-not (Test-Path $lnk.TargetPath)) { throw "shortcut target missing" }
+          if (-not (Test-Path $lnk.Arguments.Trim('"'))) { throw "run.py path wrong" }
+          $p = Start-Process -FilePath $lnk.TargetPath -ArgumentList "$($lnk.Arguments) --selftest" -WorkingDirectory $lnk.WorkingDirectory -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "app launched via shortcut failed self-test" }
+          $item = (New-Object -ComObject Shell.Application).NameSpace("$PWD").ParseName("VintedAutoPrepare.lnk")
+          $id = $item.ExtendedProperty("System.AppUserModel.ID")
+          "Shortcut AppUserModelID: $id"
+          if ($id -ne "ArisMGGR.VintedAutoPrepare") { throw "shortcut has no taskbar app ID" }
+
+      - name: Run tests
+        shell: cmd
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: venv\Scripts\python -m pytest -q
+
+      - name: Self-test the built .exe
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\VintedAutoPrepare.exe -ArgumentList "--selftest" -Wait -PassThru
+          Get-Content "$env:APPDATA\VintedAutoPrepare\app.log" -Tail 5
+          if ($p.ExitCode -ne 0) { throw "Self-test failed with exit code $($p.ExitCode)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VintedAutoPrepare-windows
+          path: dist/VintedAutoPrepare.exe

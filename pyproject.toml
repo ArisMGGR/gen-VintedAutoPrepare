@@ -1,0 +1,8 @@
+[project]
+name = "vinted-auto-prepare"
+version = "0.1.0"
+description = "Desktop app that turns folders of item photos into ready-to-post Vinted listings."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
