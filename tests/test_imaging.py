@@ -4,7 +4,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageCms
 
 from vinted_prep.imaging.crop import VINTED_ASPECT, apply_crop, compute_crop_box
 from vinted_prep.imaging.detect import ItemDetector, detect_classic
@@ -119,7 +119,7 @@ def test_detect_and_fix_tilt(tilt):
     assert fixed.shape[0] > 700 and fixed.shape[1] > 1000
 
 
-def test_no_tilt_for_straight_or_featureless_photos(photo_factory):
+def test_no_tilt_for_straight_or_featureless_photos():
     assert detect_tilt(_lined_scene(0.0)) == 0.0
     assert detect_tilt(np.full((600, 800, 3), 128, np.uint8)) == 0.0
 
@@ -162,6 +162,31 @@ def test_load_applies_exif_orientation(tmp_path):
     img.save(tmp_path / "rot.jpg", exif=exif)
     arr = load_rgb(tmp_path / "rot.jpg")
     assert arr.shape[:2] == (400, 200)
+
+
+def _display_p3_profile() -> bytes:
+    """The built-in sRGB profile with its primaries replaced by Display P3's (D50, as in Apple's profile)."""
+    data = bytearray(ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes())
+    primaries = {
+        b"rXYZ": (0.5151, 0.2412, -0.0011),
+        b"gXYZ": (0.2920, 0.6922, 0.0419),
+        b"bXYZ": (0.1571, 0.0666, 0.7841),
+    }
+    for i in range(int.from_bytes(data[128:132], "big")):  # tag table: signature, offset, size
+        entry = 132 + 12 * i
+        signature, offset = bytes(data[entry : entry + 4]), int.from_bytes(data[entry + 4 : entry + 8], "big")
+        for j, value in enumerate(primaries.get(signature, ())):
+            start = offset + 8 + 4 * j  # XYZType: 'XYZ ', reserved, then s15Fixed16 numbers
+            data[start : start + 4] = round(value * 65536).to_bytes(4, "big", signed=True)
+    return bytes(data)
+
+
+def test_display_p3_photo_is_converted_to_srgb(tmp_path):
+    Image.new("RGB", (8, 8), (200, 60, 60)).save(tmp_path / "p3.png", icc_profile=_display_p3_profile())
+    Image.new("RGB", (8, 8), (200, 60, 60)).save(tmp_path / "plain.png")
+    r, g, b = load_rgb(tmp_path / "p3.png")[0, 0].astype(int)
+    assert r > 210 and g < 50  # the same numbers mean a more saturated red in P3
+    assert load_rgb(tmp_path / "plain.png")[0, 0].tolist() == [200, 60, 60]  # untagged: unchanged
 
 
 def test_tilt_found_in_dim_low_contrast_photo():

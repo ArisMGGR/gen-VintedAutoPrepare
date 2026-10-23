@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import json
+import logging
+import math
 import os
+import shutil
 import sys
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from vinted_prep import APP_NAME
 
-# Languages offered for listing text. Key = value sent to the AI, label = shown in the UI.
+log = logging.getLogger(__name__)
+
+# Languages offered for listing text. Each name is shown in the UI and sent to the AI as is.
 LANGUAGES = [
     "Greek",
     "English",
@@ -22,6 +27,9 @@ LANGUAGES = [
     "Portuguese",
     "Polish",
 ]
+
+# AI providers: get_provider, the toolbar label and the key check all assume one of these.
+PROVIDERS = ("gemini", "ollama")
 
 
 def app_data_dir() -> Path:
@@ -39,6 +47,26 @@ def app_data_dir() -> Path:
 def default_output_dir() -> Path:
     docs = Path.home() / "Documents"
     return (docs if docs.exists() else Path.home()) / APP_NAME
+
+
+# Allowed ranges for numeric settings (the same ones the Settings dialog offers).
+_LIMITS = {
+    "max_ai_photos": (1, 12),
+    "max_straighten_deg": (1.0, 15.0),
+    "enhance_strength": (0.0, 1.0),
+    "crop_margin": (0.0, 0.4),
+    "jpeg_quality": (1, 100),
+}
+
+
+def _keep_unreadable(path: Path) -> None:
+    """Copy a settings file that can't be read aside, since the next save replaces it with defaults."""
+    backup = path.with_name(path.name + ".unreadable")
+    try:
+        shutil.copyfile(path, backup)
+        log.warning("Could not read %s; using default settings. The old file was kept as %s", path, backup)
+    except OSError as exc:
+        log.warning("Could not read %s (%s); using default settings", path, exc)
 
 
 @dataclass
@@ -76,19 +104,39 @@ class Settings:
     def load(cls, path: Path | None = None) -> "Settings":
         path = path or cls.path()
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            # From bytes, json detects UTF-8 (with or without BOM) and UTF-16/32,
+            # e.g. the UTF-16 that Windows PowerShell 5.1's '>' writes.
+            data = json.loads(path.read_bytes())
+        except OSError:
+            return cls()  # no settings yet
+        except ValueError:  # not JSON, or in another encoding (e.g. ANSI)
+            data = None
+        if not isinstance(data, dict):
+            _keep_unreadable(path)
             return cls()
-        known = {f.name: f for f in fields(cls)}
+        defaults = cls()
+        known = {f.name for f in fields(cls)}
         kwargs = {}
         for key, value in data.items():
-            if key not in known:
+            if key not in known or value is None:
                 continue
-            default = getattr(cls(), key)
+            default = getattr(defaults, key)
+            if isinstance(default, bool) != isinstance(value, bool):
+                continue  # bool("false") would be True; 1/0 aren't a valid on/off either
             try:
-                kwargs[key] = type(default)(value)
-            except (TypeError, ValueError):
-                pass
+                value = type(default)(value)
+            except (TypeError, ValueError, OverflowError):  # OverflowError: int(Infinity)
+                continue
+            if isinstance(value, float) and not math.isfinite(value):
+                continue  # NaN would slip through min/max below
+            if key == "provider":
+                value = value.strip().lower()  # a hand-edited "Ollama" still means Ollama
+                if value not in PROVIDERS:
+                    continue
+            if key in _LIMITS:
+                lo, hi = _LIMITS[key]
+                value = min(max(value, lo), hi)
+            kwargs[key] = value
         return cls(**kwargs)
 
     def save(self, path: Path | None = None) -> None:

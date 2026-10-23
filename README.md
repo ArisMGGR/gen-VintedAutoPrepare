@@ -134,3 +134,7 @@ vinted_prep/
 
 The prices are AI estimates, not market data, so check them against similar listings for
 anything valuable. Always double-check brand and size before posting.
+
+## License
+
+[MIT](LICENSE)

@@ -45,10 +45,12 @@ class Listing:
     @classmethod
     def from_dict(cls, data: dict) -> "Listing":
         listing = cls()
-        for key in asdict(listing):
-            if key in data and data[key] is not None:
-                setattr(listing, key, data[key])
-        listing.hashtags = [str(h) for h in (listing.hashtags or [])]
+        for key, default in asdict(listing).items():
+            value = data.get(key)
+            if value is not None:
+                setattr(listing, key, str(value) if isinstance(default, str) else value)
+        tags = listing.hashtags
+        listing.hashtags = [str(h) for h in tags] if isinstance(tags, list) else []
         try:
             listing.price = float(listing.price)
         except (TypeError, ValueError):
@@ -66,8 +68,6 @@ class PhotoResult:
     source: Path
     output: Path | None = None
     uncropped: bool = False  # user chose to keep the full frame for this photo
-    crop_box: tuple[int, int, int, int] | None = None
-    rotation_deg: float = 0.0
     detector: str = ""
 
 
@@ -84,17 +84,29 @@ class Item:
 
     @property
     def name(self) -> str:
-        return self.source_dir.name
+        return folder_name(self.source_dir)
+
+
+def folder_name(path: Path) -> str:
+    """The folder's name; for a drive root such as E:\\ (whose name is empty), its drive: 'E'."""
+    return path.name or re.sub(r"[\\/:]+", " ", path.drive).strip() or "item"
 
 
 def natural_key(path: Path):
-    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", path.name)]
+    # isdecimal, not isdigit: isdigit also accepts superscripts like '²', which int() rejects
+    return [int(t) if t.isdecimal() else t.lower() for t in re.split(r"(\d+)", path.name)]
+
+
+def _entries(folder: Path) -> list[Path]:
+    """Folder contents, or [] if it can't be read (e.g. the hidden 'My Music' link inside Documents)."""
+    try:
+        return list(folder.iterdir()) if folder.is_dir() else []
+    except OSError:
+        return []
 
 
 def list_images(folder: Path) -> list[Path]:
-    if not folder.is_dir():
-        return []
-    files = [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS]
+    files = [p for p in _entries(folder) if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS]
     return sorted(files, key=natural_key)
 
 
@@ -103,5 +115,5 @@ def expand_dropped_folder(folder: Path) -> list[Path]:
     treat each subfolder as an item (so a parent folder can be dropped too)."""
     if list_images(folder):
         return [folder]
-    subs = sorted((p for p in folder.iterdir() if p.is_dir()), key=natural_key) if folder.is_dir() else []
+    subs = sorted((p for p in _entries(folder) if p.is_dir()), key=natural_key)
     return [s for s in subs if list_images(s)]

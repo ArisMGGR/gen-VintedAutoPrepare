@@ -30,7 +30,6 @@ def process_photo(
         angle = detect_tilt(img, settings.max_straighten_deg)
         if angle:
             img = rotate_and_crop(img, angle)
-            result.rotation_deg = angle
 
     if settings.auto_enhance:
         img = enhance(img, settings.enhance_strength)
@@ -42,5 +41,4 @@ def process_photo(
     result.detector = method
     h, w = img.shape[:2]
     box = compute_crop_box(bbox, w, h, margin=settings.crop_margin)
-    result.crop_box = box
     return apply_crop(img, box), result

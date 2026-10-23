@@ -36,6 +36,7 @@ class GeminiProvider(Provider):
         self.retry_wait = retry_wait
         self.fallback_models = FALLBACK_MODELS if fallback_models is None else fallback_models
         self.used_model = ""
+        self.skip_reason = ""  # why the chosen model was passed over, for the status line
         self.progress = lambda msg: None  # set by the caller to show retry status
 
     def _check_key(self) -> None:
@@ -114,6 +115,8 @@ class GeminiProvider(Provider):
                 wait = self.retry_wait * 2**attempt
                 self.progress(f"Gemini '{model}' is busy, retrying in {wait:g}s…")
                 time.sleep(wait)
+            if model == self.model:
+                self.skip_reason = {404: "was not found", 429: "is out of free quota"}.get(resp.status_code, "was busy")
             if resp.status_code == 404:
                 if model == self.model and not self.fallback_models:
                     self._raise_for(resp)

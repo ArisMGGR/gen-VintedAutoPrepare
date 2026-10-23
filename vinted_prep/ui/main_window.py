@@ -56,7 +56,7 @@ class MainWindow(QMainWindow):
         self.runner.signals.progress.connect(self._job_progress)
         self.runner.signals.finished.connect(self._job_finished)
         self.items: dict[str, Item] = {}
-        self.queued: set[str] = set()
+        self.queued: dict[str, int] = {}  # item id -> its jobs submitted and not finished yet
         self.running: str | None = None
         self._dirty: set[str] = set()
         self._save_timer = QTimer(self, singleShot=True, interval=700)
@@ -168,16 +168,18 @@ class MainWindow(QMainWindow):
 
     def add_folders(self, folders: list[Path]) -> None:
         known = {i.source_dir.resolve() for i in self.items.values()}
+        taken = {i.output_dir for i in self.items.values()}
         root = self.settings.resolved_output_dir()
         added, first = 0, None
         for folder in folders:
             for src in expand_dropped_folder(folder):
                 if src.resolve() in known:
                     continue
-                item = Item(source_dir=src, output_dir=assign_output_dir(root, src))
+                item = Item(source_dir=src, output_dir=assign_output_dir(root, src, taken))
                 load_saved(item)
                 self.items[item.id] = item
                 known.add(src.resolve())
+                taken.add(item.output_dir)
                 entry = QListWidgetItem()
                 entry.setData(Qt.UserRole, item.id)
                 self.queue.addItem(entry)
@@ -225,6 +227,7 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(1 if item else 0)
 
     def remove_selected(self) -> None:
+        self._flush_saves()  # edits made just before Remove, as clear_all does
         for entry in self.queue.selectedItems():
             item_id = entry.data(Qt.UserRole)
             if item_id in self.queued:
@@ -253,20 +256,19 @@ class MainWindow(QMainWindow):
             )
             if answer == QMessageBox.Yes:
                 self.open_settings()
-            return bool(self.settings.effective_gemini_key())
+            # The user may have switched to Ollama in Settings instead of adding a key.
+            return self.settings.provider != "gemini" or bool(self.settings.effective_gemini_key())
         return True
 
     def process(self, item_ids: list[str], photos: bool = True, ai: bool = True) -> None:
         if ai and not self._ai_ready():
             return
         self._flush_saves()
-        if not self.queued:
-            self.processor.cancel_event.clear()
         for item_id in item_ids:
             item = self.items.get(item_id)
             if not item or item_id in self.queued:
                 continue
-            self.queued.add(item_id)
+            self.queued[item_id] = 1
             self._refresh_entry(item_id)
             self.runner.submit(item_id, lambda progress, it=item: self.processor.process(it, progress, photos, ai))
         self._update_busy()
@@ -280,9 +282,10 @@ class MainWindow(QMainWindow):
 
     def _toggle_crop(self, item_id: str, index: int, uncropped: bool) -> None:
         item = self.items[item_id]
-        previous = item.status, item.message
 
         def job(progress, item=item):
+            # Taken when the job runs, not on the click: a job queued before this one may change it.
+            previous = item.status, item.message
             item.status, item.message = Status.PROCESSING, "Updating photo…"
             try:
                 self.processor.reprocess_photo(item, index, uncropped)
@@ -290,18 +293,23 @@ class MainWindow(QMainWindow):
             except Exception as exc:
                 item.status, item.message = Status.ERROR, f"Could not update photo: {exc}"
 
-        self.queued.add(item_id)
+        # The item may already have jobs queued (or another toggle): count them all,
+        # so it stays busy until the last one is done.
+        self.queued[item_id] = self.queued.get(item_id, 0) + 1
+        self._refresh_entry(item_id)
         self.runner.submit(item_id, job)
         self._update_busy()
 
     def stop(self) -> None:
-        self.processor.cancel_event.set()
+        self.processor.stop()
         self.runner.clear_queue()
         for item_id in list(self.queued):
             if item_id != self.running:
-                self.queued.discard(item_id)
+                del self.queued[item_id]
                 self._refresh_entry(item_id)
-        self.statusBar().showMessage("Stopping after the current photo…")
+            else:
+                self.queued[item_id] = 1  # only the running job is left; its queued ones were dropped
+        self.statusBar().showMessage("Stopping…")  # after the current photo, or at once while waiting for the AI
         self._update_busy()
 
     def _update_busy(self) -> None:
@@ -325,12 +333,16 @@ class MainWindow(QMainWindow):
             self.panel.refresh_status()
 
     def _job_finished(self, item_id: str) -> None:
-        self.queued.discard(item_id)
+        left = self.queued.pop(item_id, 0) - 1
+        if left > 0:  # another job for this item is still queued
+            self.queued[item_id] = left
         self.running = None
         self._refresh_entry(item_id)
         if self.panel.item and self.panel.item.id == item_id:
             self.panel.refresh_item()
         self._update_busy()
+        if item_id in self._dirty:  # edited while it waited in the queue
+            self._save_timer.start()
         if not self.queued:
             done = sum(i.status == Status.DONE for i in self.items.values())
             errors = sum(i.status == Status.ERROR for i in self.items.values())
@@ -345,13 +357,15 @@ class MainWindow(QMainWindow):
     def _flush_saves(self) -> None:
         for item_id in list(self._dirty):
             item = self.items.get(item_id)
-            if item and item_id not in self.queued and (item.output_dir / LISTING_JSON).exists():
+            if item_id in self.queued:
+                continue  # a job owns the item; stays dirty and is saved once the job is done
+            if item and (item.output_dir / LISTING_JSON).exists():
                 try:
                     save_item(item)
                 except OSError as exc:
                     self.statusBar().showMessage(f"Could not save {item.name}: {exc}", 8000)
             self._refresh_entry(item_id)
-        self._dirty.clear()
+            self._dirty.discard(item_id)
 
     # --- misc ---
     def open_output_root(self) -> None:
@@ -362,12 +376,32 @@ class MainWindow(QMainWindow):
     def open_settings(self) -> None:
         dialog = SettingsDialog(self.settings, self)
         if dialog.exec():
+            old_root = self.settings.resolved_output_dir()
             new = dialog.settings
             new.language = self.language.currentText()
             for field in vars(new):
                 setattr(self.settings, field, getattr(new, field))
             self.settings.save()
             self._update_provider_label()
+            if self.settings.resolved_output_dir() != old_root:
+                self._move_unsaved_items()
+
+    def _move_unsaved_items(self) -> None:
+        """After the output folder changes, point items with nothing saved yet at the new one.
+        Items that already have results keep them where they are."""
+        self._flush_saves()
+        root = self.settings.resolved_output_dir()
+        taken = {i.output_dir for i in self.items.values()}
+        for item in self.items.values():
+            if item.id in self.queued or (item.output_dir / LISTING_JSON).exists():
+                continue
+            taken.discard(item.output_dir)
+            item.output_dir = assign_output_dir(root, item.source_dir, taken)
+            taken.add(item.output_dir)
+            load_saved(item)  # the new folder may already hold a result for it
+            self._refresh_entry(item.id)
+        if self.panel.item:
+            self.panel.refresh_item()
 
     def closeEvent(self, event) -> None:
         self._flush_saves()
@@ -376,5 +410,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             self.stop()
-            self.runner.wait(10000)
+            if self.runner.wait(10000):
+                self.queued.clear()  # every job has ended, so their edits can be saved now
+            self._flush_saves()
         event.accept()

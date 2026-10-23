@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Callable
+from typing import Callable, TypeVar
 
 from vinted_prep.ai import AIError, get_provider
 from vinted_prep.config import Settings, app_data_dir
@@ -14,6 +14,7 @@ from vinted_prep.imaging.pipeline import process_photo
 from vinted_prep.models import Item, Status, list_images
 
 Progress = Callable[[str], None]
+T = TypeVar("T")
 
 
 class Cancelled(Exception):
@@ -39,18 +40,48 @@ class Processor:
         self.detector = detector or ItemDetector(app_data_dir() / "models")
         self.cancel_event = threading.Event()
 
-    def _check_cancel(self) -> None:
-        if self.cancel_event.is_set():
+    def stop(self) -> None:
+        """Cancel the job that is running now. Jobs that start later get a fresh event,
+        so work queued after Stop (while the stopped job finishes) is not cancelled too."""
+        self.cancel_event.set()
+        self.cancel_event = threading.Event()
+
+    @staticmethod
+    def _check_cancel(cancel: threading.Event) -> None:
+        if cancel.is_set():
             raise Cancelled()
 
-    def process_photos(self, item: Item, progress: Progress) -> None:
+    @staticmethod
+    def _call_abortable(fn: Callable[[], T], cancel: threading.Event) -> T:
+        """Run fn (a slow AI request) on a helper thread so Stop doesn't wait for the reply.
+        On Stop the request is abandoned and its reply dropped; the daemon thread can't keep
+        the app running after it is closed."""
+        done, box = threading.Event(), {}
+
+        def target():
+            try:
+                box["value"] = fn()
+            except BaseException as exc:  # handed over to the job's thread below
+                box["error"] = exc
+            done.set()
+
+        threading.Thread(target=target, daemon=True, name="ai-request").start()
+        while not done.wait(0.1):
+            if cancel.is_set():
+                raise Cancelled()
+        if "error" in box:
+            raise box["error"]
+        return box["value"]
+
+    def process_photos(self, item: Item, progress: Progress, cancel: threading.Event | None = None) -> None:
+        cancel = cancel or self.cancel_event
         sources = list_images(item.source_dir)
         if not sources:
             raise RuntimeError("No photos found in this folder.")
         uncropped = {p.source: p.uncropped for p in item.photos}
         results = []
         for i, src in enumerate(sources):
-            self._check_cancel()
+            self._check_cancel(cancel)
             progress(f"Photo {i + 1}/{len(sources)}: {src.name}")
             img, result = process_photo(src, self.settings, self.detector, uncropped.get(src, False), progress)
             result.output = item.output_dir / photo_filename(i)
@@ -67,35 +98,39 @@ class Processor:
         item.photos[index] = result
         save_item(item)
 
-    def run_ai(self, item: Item, progress: Progress) -> str:
+    def run_ai(self, item: Item, progress: Progress, cancel: threading.Event | None = None) -> str:
         """Writes item.listing; returns a note for the status line ('' if nothing to add)."""
+        cancel = cancel or self.cancel_event
         photos = [p.output for p in item.photos if p.output and p.output.exists()]
         if not photos:
             raise RuntimeError("Process the photos first.")
         chosen = pick_evenly(photos, self.settings.max_ai_photos)
         max_side = 1024 if self.settings.provider == "gemini" else 896
         images = [to_jpeg_b64(load_rgb(p), max_side=max_side) for p in chosen]
-        self._check_cancel()
+        self._check_cancel(cancel)
         provider = get_provider(self.settings)
-        provider.progress = progress
+        provider.progress = lambda msg: None if cancel.is_set() else progress(msg)  # quiet once abandoned
         progress(f"Asking {provider.name} to write the listing ({len(images)} photos)...")
-        item.listing = provider.analyze(images, item.notes, self.settings.language)
+        notes, language = item.notes, self.settings.language
+        item.listing = self._call_abortable(lambda: provider.analyze(images, notes, language), cancel)
         used = getattr(provider, "used_model", "")
         if used and used != getattr(provider, "model", used):
-            return f" (written by {used}: {provider.model} was busy)"
+            reason = getattr(provider, "skip_reason", "") or "unavailable"
+            return f" (written by {used}: {provider.model} {reason})"
         return ""
 
     def process(self, item: Item, progress: Progress, photos: bool = True, ai: bool = True) -> None:
         """Runs the requested steps and always leaves item.status/message set."""
+        cancel = self.cancel_event  # taken now: stop() swaps in a new event for later jobs
         item.status = Status.PROCESSING
         try:
             item.output_dir.mkdir(parents=True, exist_ok=True)
             if photos:
-                self.process_photos(item, progress)
+                self.process_photos(item, progress, cancel)
                 save_item(item)
             note = ""
             if ai:
-                note = self.run_ai(item, progress)
+                note = self.run_ai(item, progress, cancel)
                 save_item(item)
             item.status, item.message = Status.DONE, "Ready" + note
         except Cancelled:
