@@ -25,11 +25,11 @@ latest *Windows build* run → download the `VintedAutoPrepare-windows` artifact
 Windows SmartScreen may warn because the exe isn't signed: *More info → Run anyway*.
 
 **Option B – build it yourself**
-Install [Python 3.11+](https://www.python.org/downloads/) (tick *Add python.exe to PATH*),
+Install [Python 3.11–3.14](https://www.python.org/downloads/) (tick *Add python.exe to PATH*),
 then double-click `build_windows.bat`. The result is `dist\VintedAutoPrepare.exe`.
 
 **Option C – run from source (two double-clicks)**
-Install [Python 3.11+](https://www.python.org/downloads/) (tick *Add python.exe to PATH*), then in the project folder:
+Install [Python 3.11–3.14](https://www.python.org/downloads/) (tick *Add python.exe to PATH*), then in the project folder:
 
 1. Double-click **`Install.bat`**. It creates the `venv` folder, updates pip, installs the
    requirements and creates a **`VintedAutoPrepare`** shortcut in the project folder.
