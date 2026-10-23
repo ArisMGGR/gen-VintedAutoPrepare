@@ -225,6 +225,27 @@ def test_damaged_listing_json_does_not_stop_the_folder_being_added(tmp_path, ite
     assert item.listing is None or (item.listing.title == "7" and item.listing.hashtags == [])
 
 
+@pytest.mark.parametrize("escape", ["absolute", "relative"])
+def test_photo_toggle_never_writes_outside_the_output_folder(proc, item_folder, escape):
+    original = item_folder / "IMG_2.jpg"
+    before = original.read_bytes()
+    out = proc.settings.resolved_output_dir() / item_folder.name
+    out.mkdir(parents=True)
+    file = str(original) if escape == "absolute" else str(Path("..", "..", item_folder.name, "IMG_2.jpg"))
+    listing_json = {
+        "source_dir": str(item_folder.resolve()),
+        "photos": [{"source": str(original), "file": file}],  # hand-edited
+        "listing": {"title": "t", "description": "d"},
+    }
+    (out / LISTING_JSON).write_text(json.dumps(listing_json), encoding="utf-8")
+    item = Item(item_folder, out)
+    load_saved(item)
+    assert item.photos[0].output is None  # not one of our NN.jpg files
+    proc.reprocess_photo(item, 0, uncropped=False)  # right-click → toggle crop
+    assert original.read_bytes() == before  # "Your original photos are never modified"
+    assert item.photos[0].output == out / "01.jpg"
+
+
 def test_listing_json_with_bom_is_reloaded(proc, item_folder, fake_provider):
     item = Item(item_folder, assign_output_dir(proc.settings.resolved_output_dir(), item_folder))
     proc.process(item, lambda m: None)

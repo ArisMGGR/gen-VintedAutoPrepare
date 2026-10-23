@@ -110,7 +110,8 @@ def load_saved(item: Item) -> bool:
         if not isinstance(p, dict) or not isinstance(p.get("source"), str):
             continue  # hand-edited or damaged entry
         file = p.get("file")
-        out = item.output_dir / file if isinstance(file, str) and file else None
+        # Only our own NN.jpg names: a path here would let a photo toggle overwrite any file.
+        out = item.output_dir / file if isinstance(file, str) and _PHOTO_RE.match(file) else None
         item.photos.append(
             PhotoResult(source=Path(p["source"]), output=out if out and out.exists() else None, uncropped=p.get("uncropped") is True)
         )

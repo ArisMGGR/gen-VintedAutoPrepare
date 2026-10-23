@@ -29,6 +29,9 @@ settings.json.unreadable
 *.heic
 *.heif
 *.webp
+*.bmp
+*.tif
+*.tiff
 listing.txt
 listing.json
 

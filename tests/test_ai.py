@@ -56,6 +56,17 @@ def test_parse_errors(text):
         parse_listing(text, "English")
 
 
+@pytest.mark.parametrize("price", [float("nan"), float("inf"), 1e308])  # 1e308 * 2 is already infinite
+def test_parse_unusable_price_becomes_zero(price):
+    assert parse_listing(json.dumps(dict(GOOD, price=price)), "English").price == 0.0
+
+
+@pytest.mark.parametrize("tags", [5, True])
+def test_parse_hashtags_that_are_not_a_list(tags):
+    listing = parse_listing(json.dumps(dict(GOOD, hashtags=tags)), "English")
+    assert listing.hashtags == [] and listing.title == GOOD["title"]
+
+
 def test_prompt_includes_language_and_notes():
     prompt = build_user_prompt("worn twice", "French")
     assert "French" in prompt and "worn twice" in prompt
