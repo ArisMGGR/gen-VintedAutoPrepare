@@ -1,9 +1,49 @@
+# Python bytecode and caches
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
-.venv/
+
+# Virtual environments (Install.bat / build_windows.bat create venv/)
 venv/
+.venv/
+
+# PyInstaller output (build_windows.bat)
 build/
 dist/
 *.spec
+
+# Secrets and local settings (the app stores the Gemini key in settings.json)
+.env
+.env.*
+!.env.example
+settings.json
+settings.json.unreadable
+
+# App runtime files (normally under %APPDATA%\VintedAutoPrepare; keep out if copied here)
+*.log
+*.onnx
+
+# Item photos and app output (originals may carry EXIF location data; icons live in assets/)
+*.jpg
+*.jpeg
+*.heic
+*.heif
+*.webp
+*.bmp
+*.tif
+*.tiff
+listing.txt
+listing.json
+output/
+
+# Machine-specific shortcut (tools/make_shortcut.ps1 writes absolute paths)
 VintedAutoPrepare.lnk
+
+# Local audit notes
+tests/FINDINGS.md
+tests/LOG.md
+tests/VERIFY.md
+
+# Windows
+Thumbs.db
+desktop.ini

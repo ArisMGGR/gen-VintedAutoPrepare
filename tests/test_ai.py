@@ -44,15 +44,27 @@ def test_parse_price_strings_and_unknowns():
 
 
 def test_parse_long_title_is_cut_on_a_word():
-    data = dict(GOOD, title="Very " * 30 + "long title")
+    data = dict(GOOD, title="Lovely " * 15)  # character 60 falls inside a word
     title = parse_listing(json.dumps(data), "English").title
-    assert len(title) <= TITLE_MAX and not title.endswith(" ")
+    assert len(title) <= TITLE_MAX
+    assert title == " ".join(["Lovely"] * 8)  # no half word ("Love") at the end
 
 
 @pytest.mark.parametrize("text", ["not json at all", "{broken", json.dumps({"brand": "x"})])
 def test_parse_errors(text):
     with pytest.raises(AIError):
         parse_listing(text, "English")
+
+
+@pytest.mark.parametrize("price", [float("nan"), float("inf"), 1e308])  # 1e308 * 2 is already infinite
+def test_parse_unusable_price_becomes_zero(price):
+    assert parse_listing(json.dumps(dict(GOOD, price=price)), "English").price == 0.0
+
+
+@pytest.mark.parametrize("tags", [5, True])
+def test_parse_hashtags_that_are_not_a_list(tags):
+    listing = parse_listing(json.dumps(dict(GOOD, hashtags=tags)), "English")
+    assert listing.hashtags == [] and listing.title == GOOD["title"]
 
 
 def test_prompt_includes_language_and_notes():
@@ -85,7 +97,10 @@ class FakeSession:
 
     def post(self, url, **kw):
         self.calls.append(("POST", url, kw))
-        return self.responses.pop(0)
+        resp = self.responses.pop(0)
+        if isinstance(resp, Exception):
+            raise resp
+        return resp
 
     def get(self, url, **kw):
         self.calls.append(("GET", url, kw))
@@ -109,9 +124,9 @@ def test_gemini_request_and_response():
 
 
 def test_gemini_ignores_thought_parts():
-    resp = FakeResponse(
-        200, {"candidates": [{"content": {"parts": [{"text": "thinking...", "thought": True}, {"text": json.dumps(GOOD)}]}}]}
-    )
+    draft = json.dumps(dict(GOOD, title="draft"))  # a thought that looks like an answer
+    parts = [{"text": draft, "thought": True}, {"text": json.dumps(GOOD)}]
+    resp = FakeResponse(200, {"candidates": [{"content": {"parts": parts}}]})
     assert GeminiProvider("K", "m", FakeSession(resp)).analyze(["A"], "", "Greek").title == GOOD["title"]
 
 
@@ -137,7 +152,32 @@ def test_gemini_falls_back_to_next_model_when_overloaded():
     provider = GeminiProvider("K", "main", session, retry_wait=0, fallback_models=["gone", "backup"])
     assert provider.analyze(["A"], "", "Greek").brand == "Zara"
     assert _models_called(session) == ["main", "main", "main", "gone", "backup"]
-    assert provider.used_model == "backup"
+    assert provider.used_model == "backup" and provider.skip_reason == "was busy"
+
+
+def test_gemini_hung_model_skips_to_next_model():
+    import requests
+
+    session = FakeSession(requests.ReadTimeout("read timed out"), gemini_ok(json.dumps(GOOD)))
+    provider = GeminiProvider("K", "main", session, retry_wait=0, fallback_models=["backup"])
+    assert provider.analyze(["A"], "", "Greek").brand == "Zara"
+    assert _models_called(session) == ["main", "backup"]  # no retries on the hung model
+    assert provider.skip_reason == "was busy"
+
+
+def test_gemini_offline_is_a_connection_error():
+    import requests
+
+    session = FakeSession(requests.ConnectionError("no route"))
+    with pytest.raises(AIError, match="internet connection"):
+        GeminiProvider("K", "main", session, retry_wait=0, fallback_models=["backup"]).analyze(["A"], "", "Greek")
+
+
+def test_gemini_missing_model_reason_is_not_busy():
+    missing = FakeResponse(404, {"error": {"message": "not found"}})
+    provider = GeminiProvider("K", "typo", FakeSession(missing, gemini_ok(json.dumps(GOOD))), fallback_models=["ok"])
+    provider.analyze(["A"], "", "Greek")
+    assert provider.used_model == "ok" and provider.skip_reason == "was not found"
 
 
 def test_gemini_all_overloaded_gives_friendly_error():
@@ -205,10 +245,26 @@ def test_ollama_errors():
             ["A"], "", "Greek"
         )
 
+    class PageNotFound(FakeResponse):  # what a wrong URL path (e.g. .../v1) gets back
+        def __init__(self):
+            super().__init__(404, None)
+            self.text = "404 page not found"
 
-def test_ollama_list_models():
-    payload = {"models": [{"name": "qwen2.5vl:7b"}, {"name": "gemma3:12b"}]}
-    assert OllamaProvider("http://x", "m", FakeSession(FakeResponse(200, payload))).list_models() == [
-        "gemma3:12b",
-        "qwen2.5vl:7b",
-    ]
+        def json(self):
+            raise ValueError("not JSON")
+
+    with pytest.raises(AIError, match=r"check the Ollama URL") as err:
+        OllamaProvider("http://x/v1", "m", FakeSession(PageNotFound())).analyze(["A"], "", "Greek")
+    assert "ollama pull" not in str(err.value)
+
+
+def test_ollama_list_models_keeps_only_vision_models():
+    payload = {"models": [{"name": "qwen2.5vl:7b"}, {"name": "llama3.2:3b"}, {"name": "gemma3:12b"}]}
+    session = FakeSession(
+        FakeResponse(200, payload),
+        FakeResponse(200, {"capabilities": ["completion", "vision"]}),  # gemma3:12b
+        FakeResponse(200, {"capabilities": ["completion"]}),  # llama3.2:3b: text only
+        FakeResponse(200, {"details": {}}),  # qwen2.5vl:7b on an Ollama too old to report capabilities
+    )
+    assert OllamaProvider("http://x", "m", session).list_models() == ["gemma3:12b", "qwen2.5vl:7b"]
+    assert [kw["json"]["model"] for method, url, kw in session.calls[1:]] == ["gemma3:12b", "llama3.2:3b", "qwen2.5vl:7b"]

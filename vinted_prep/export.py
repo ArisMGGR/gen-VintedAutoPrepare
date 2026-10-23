@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-from vinted_prep.models import Item, Listing, PhotoResult, Status
+from vinted_prep.models import Item, Listing, PhotoResult, Status, folder_name
 
 LISTING_JSON = "listing.json"
 LISTING_TXT = "listing.txt"
@@ -23,19 +23,35 @@ def photo_filename(index: int) -> str:
     return f"{index + 1:02d}.jpg"
 
 
-def _saved_source(folder: Path) -> str | None:
+def _read_listing_json(folder: Path) -> dict | None:
+    """The folder's listing.json, or None if it is missing, unreadable or not a JSON object."""
     try:
-        return json.loads((folder / LISTING_JSON).read_text(encoding="utf-8")).get("source_dir")
+        # From bytes, json detects UTF-8 (with or without BOM) and UTF-16/32, as Settings.load does.
+        data = json.loads((folder / LISTING_JSON).read_bytes())
     except (OSError, ValueError):
         return None
+    return data if isinstance(data, dict) else None
 
 
-def assign_output_dir(root: Path, source_dir: Path) -> Path:
-    """<root>/<folder name>, or '<name> (2)' etc. if that belongs to a different source folder."""
+def _saved_source(folder: Path) -> str | None:
+    data = _read_listing_json(folder)
+    return data.get("source_dir") if data else None
+
+
+def _belongs_to_other(candidate: Path, source: str) -> bool:
+    return candidate.exists() and any(candidate.iterdir()) and _saved_source(candidate) != source
+
+
+def assign_output_dir(root: Path, source_dir: Path, taken: set[Path] | frozenset[Path] = frozenset()) -> Path:
+    """<root>/<folder name>, or '<name> (2)' etc. if that belongs to a different source folder.
+
+    taken: folders already given to other items that may not have been written yet
+    (two same-named folders added together must not share one output folder)."""
     source = str(source_dir.resolve())
-    candidate, n = root / source_dir.name, 2
-    while candidate.exists() and any(candidate.iterdir()) and _saved_source(candidate) != source:
-        candidate = root / f"{source_dir.name} ({n})"
+    name = folder_name(source_dir)
+    candidate, n = root / name, 2
+    while candidate in taken or _belongs_to_other(candidate, source):
+        candidate = root / f"{name} ({n})"
         n += 1
     return candidate
 
@@ -84,19 +100,23 @@ def save_item(item: Item) -> None:
 
 def load_saved(item: Item) -> bool:
     """Restore a previously processed item from its output folder. Returns True if found."""
-    path = item.output_dir / LISTING_JSON
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    data = _read_listing_json(item.output_dir)
+    if data is None:
         return False
-    item.notes = data.get("notes", "")
+    notes, photos = data.get("notes"), data.get("photos")
+    item.notes = notes if isinstance(notes, str) else ""
     item.photos = []
-    for p in data.get("photos", []):
-        out = item.output_dir / p["file"] if p.get("file") else None
+    for p in photos if isinstance(photos, list) else []:
+        if not isinstance(p, dict) or not isinstance(p.get("source"), str):
+            continue  # hand-edited or damaged entry
+        file = p.get("file")
+        # Only our own NN.jpg names: a path here would let a photo toggle overwrite any file.
+        out = item.output_dir / file if isinstance(file, str) and _PHOTO_RE.match(file) else None
         item.photos.append(
-            PhotoResult(source=Path(p["source"]), output=out if out and out.exists() else None, uncropped=p.get("uncropped", False))
+            PhotoResult(source=Path(p["source"]), output=out if out and out.exists() else None, uncropped=p.get("uncropped") is True)
         )
-    item.listing = Listing.from_dict(data["listing"]) if data.get("listing") else None
+    listing = data.get("listing")
+    item.listing = Listing.from_dict(listing) if isinstance(listing, dict) and listing else None
     has_photos = any(p.output for p in item.photos)
     item.status = Status.DONE if (item.listing and has_photos) else Status.PENDING
     item.message = "Loaded previous result" if item.status == Status.DONE else ""

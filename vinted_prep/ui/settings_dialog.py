@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 from vinted_prep.ai import AIError
 from vinted_prep.ai.gemini import KEY_URL, GeminiProvider
 from vinted_prep.ai.ollama import DOWNLOAD_URL, OllamaProvider
-from vinted_prep.config import Settings
+from vinted_prep.config import Settings, default_output_dir
 
 PROVIDERS = [("gemini", "Google Gemini — free tier, online"), ("ollama", "Ollama — free, offline on your PC")]
 
@@ -191,6 +191,9 @@ class SettingsDialog(QDialog):
             QGuiApplication.restoreOverrideCursor()
             QMessageBox.warning(self, "Connection problem", str(exc))
             return
+        except Exception:
+            QGuiApplication.restoreOverrideCursor()  # don't leave a busy cursor behind the error dialog
+            raise
         QGuiApplication.restoreOverrideCursor()
         current = combo.currentText()
         combo.clear()
@@ -204,10 +207,12 @@ class SettingsDialog(QDialog):
             QMessageBox.information(self, "Connected", f"Connected. {len(models)} model(s) available.")
 
     def _refresh_gemini(self) -> None:
-        self._fill_models(self.gemini_model, GeminiProvider(self.gemini_key.text(), self.gemini_model.currentText()))
+        key = Settings(gemini_api_key=self.gemini_key.text().strip()).effective_gemini_key()  # field, else GEMINI_API_KEY
+        self._fill_models(self.gemini_model, GeminiProvider(key, self.gemini_model.currentText()))
 
     def _refresh_ollama(self) -> None:
-        self._fill_models(self.ollama_model, OllamaProvider(self.ollama_url.text(), self.ollama_model.currentText()))
+        url = self.ollama_url.text().strip()  # as accept() saves it: a trailing space breaks the URL
+        self._fill_models(self.ollama_model, OllamaProvider(url, self.ollama_model.currentText()))
 
     def accept(self) -> None:
         s = self.settings
@@ -222,5 +227,6 @@ class SettingsDialog(QDialog):
         s.auto_enhance = self.enhance.isChecked()
         s.enhance_strength = self.strength.value() / 100
         s.crop_margin = self.margin.value() / 100
-        s.output_dir = self.output_dir.text().strip()
+        out = self.output_dir.text().strip()
+        s.output_dir = "" if out == str(default_output_dir()) else out  # "" keeps following the default
         super().accept()

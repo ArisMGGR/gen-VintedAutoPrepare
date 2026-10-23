@@ -54,7 +54,11 @@ jobs:
           Get-Content "$env:APPDATA\VintedAutoPrepare\app.log" -Tail 5
           if ($p.ExitCode -ne 0) { throw "Self-test failed with exit code $($p.ExitCode)" }
 
+      # The .exe is ~145 MB, so only keep it for releases (v* tags) and manual runs, for 7 days:
+      # uploading it on every push filled the repo's artifact storage quota and failed the build.
       - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         with:
           name: VintedAutoPrepare-windows
           path: dist/VintedAutoPrepare.exe
+          retention-days: 7

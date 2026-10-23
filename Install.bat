@@ -5,14 +5,17 @@ setlocal
 cd /d "%~dp0"
 title VintedAutoPrepare - Install
 
-REM Find Python 3.11+ (prefer the "py" launcher that comes with python.org installers).
+REM Find Python 3.11-3.14 (prefer the "py" launcher that comes with python.org installers).
+REM Not "py -3": that picks the newest Python, and onnxruntime-directml has no wheels for 3.15+ yet.
 set "PY="
-py -3 -c "import sys; sys.exit(sys.version_info < (3, 11))" >nul 2>&1 && set "PY=py -3"
-if not defined PY (
-    python -c "import sys; sys.exit(sys.version_info < (3, 11))" >nul 2>&1 && set "PY=python"
+for %%V in (3.14 3.13 3.12 3.11) do (
+    if not defined PY (py -%%V -c "pass" >nul 2>&1 && set "PY=py -%%V")
 )
 if not defined PY (
-    echo Python 3.11 or newer was not found.
+    python -c "import sys; sys.exit(not (3, 11) <= sys.version_info[:2] <= (3, 14))" >nul 2>&1 && set "PY=python"
+)
+if not defined PY (
+    echo Python 3.11 to 3.14 was not found ^(newer versions are not supported yet^).
     echo Install it from https://www.python.org/downloads/ and tick "Add python.exe to PATH",
     echo then run this file again.
     goto :fail

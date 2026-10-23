@@ -21,15 +21,15 @@ You review everything, edit if needed, and paste it into Vinted with the **Copy*
 
 **Option A – download the .exe**
 Every push builds `VintedAutoPrepare.exe` on GitHub: open the repository's **Actions** tab →
-latest *Windows build* run → download the `VintedAutoPrepare-windows` artifact and unzip it.
+latest *Windows build* run for a `v*` tag (or start one with *Run workflow*) → download the `VintedAutoPrepare-windows` artifact and unzip it.
 Windows SmartScreen may warn because the exe isn't signed: *More info → Run anyway*.
 
 **Option B – build it yourself**
-Install [Python 3.11+](https://www.python.org/downloads/) (tick *Add python.exe to PATH*),
+Install [Python 3.11–3.14](https://www.python.org/downloads/) (tick *Add python.exe to PATH*),
 then double-click `build_windows.bat`. The result is `dist\VintedAutoPrepare.exe`.
 
 **Option C – run from source (two double-clicks)**
-Install [Python 3.11+](https://www.python.org/downloads/) (tick *Add python.exe to PATH*), then in the project folder:
+Install [Python 3.11–3.14](https://www.python.org/downloads/) (tick *Add python.exe to PATH*), then in the project folder:
 
 1. Double-click **`Install.bat`**. It creates the `venv` folder, updates pip, installs the
    requirements and creates a **`VintedAutoPrepare`** shortcut in the project folder.
@@ -90,7 +90,8 @@ Tips:
 
 ## 4. Output
 
-Results go to `Documents\VintedAutoPrepare\<item folder name>\` (changeable in Settings):
+Results go to `output\<item folder name>\` inside the project folder (`Documents\VintedAutoPrepare\` for the
+packaged .exe), changeable in Settings:
 
 ```
 01.jpg 02.jpg …   processed photos, original order, location data (EXIF) removed
@@ -134,3 +135,7 @@ vinted_prep/
 
 The prices are AI estimates, not market data, so check them against similar listings for
 anything valuable. Always double-check brand and size before posting.
+
+## License
+
+[MIT](LICENSE)

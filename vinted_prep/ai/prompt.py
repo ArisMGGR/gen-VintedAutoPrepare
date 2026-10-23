@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 
 from vinted_prep.ai.base import AIError
@@ -116,7 +117,7 @@ def _to_price(value) -> float:
         price = float(value)
     except (TypeError, ValueError):
         return 0.0
-    if price <= 0:
+    if not math.isfinite(price * 2) or price <= 0:  # NaN, Infinity or too big to round
         return 0.0
     return max(1.0, round(price * 2) / 2)  # whole euros or .50
 
@@ -143,6 +144,8 @@ def parse_listing(text: str, language: str) -> Listing:
     tags = data.get("hashtags") or []
     if isinstance(tags, str):
         tags = re.split(r"[,\s]+", tags)
+    elif not isinstance(tags, list):  # e.g. a number: not something to iterate over
+        tags = []
     seen, hashtags = set(), []
     for tag in tags:
         tag = re.sub(r"[\s#]+", "", str(tag)).lower()

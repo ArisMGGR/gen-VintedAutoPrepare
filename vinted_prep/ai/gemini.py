@@ -16,7 +16,8 @@ KEY_URL = "https://aistudio.google.com/apikey"
 # Tried in order after the chosen model when it is overloaded (503) or out of free quota (429).
 # Models that don't exist (anymore) are skipped.
 FALLBACK_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
-BUSY = (500, 502, 503, 504)
+STALLED = 408  # stand-in status for a request Gemini accepted but never answered
+BUSY = (STALLED, 500, 502, 503, 504)
 
 
 class GeminiProvider(Provider):
@@ -36,6 +37,7 @@ class GeminiProvider(Provider):
         self.retry_wait = retry_wait
         self.fallback_models = FALLBACK_MODELS if fallback_models is None else fallback_models
         self.used_model = ""
+        self.skip_reason = ""  # why the chosen model was passed over, for the status line
         self.progress = lambda msg: None  # set by the caller to show retry status
 
     def _check_key(self) -> None:
@@ -89,8 +91,14 @@ class GeminiProvider(Provider):
                 f"{API_BASE}/models/{model}:generateContent",
                 json=body,
                 headers={"x-goog-api-key": self.api_key},
-                timeout=180,
+                timeout=(15, 90),
             )
+        except requests.ReadTimeout:
+            # Connected fine, but the model hung (it happens when it's overloaded): treat it as busy.
+            resp = requests.Response()
+            resp.status_code = STALLED
+            resp._content = b'{"error": {"message": "no answer within 90s"}}'
+            return resp
         except requests.RequestException as exc:
             raise AIError(f"Could not reach Gemini (check your internet connection): {exc}") from None
 
@@ -109,11 +117,13 @@ class GeminiProvider(Provider):
                 if resp.status_code not in BUSY + (429,):
                     break
                 last_busy = resp
-                if resp.status_code == 429 or attempt == attempts - 1:
-                    break  # quota is per model: try the next one right away
+                if resp.status_code in (429, STALLED) or attempt == attempts - 1:
+                    break  # quota is per model, and waiting out another hang is too slow: try the next one
                 wait = self.retry_wait * 2**attempt
                 self.progress(f"Gemini '{model}' is busy, retrying in {wait:g}s…")
                 time.sleep(wait)
+            if model == self.model:
+                self.skip_reason = {404: "was not found", 429: "is out of free quota"}.get(resp.status_code, "was busy")
             if resp.status_code == 404:
                 if model == self.model and not self.fallback_models:
                     self._raise_for(resp)

@@ -40,16 +40,16 @@ class OllamaProvider(Provider):
             resp = self.http.post(f"{self.base_url}/api/chat", json=body, timeout=900)
         except requests.RequestException as exc:
             raise self._not_running(exc) from None
-        if resp.status_code == 404:
-            raise AIError(
-                f"Ollama model '{self.model}' is not installed. Run:  ollama pull {self.model}"
-            )
         if resp.status_code != 200:
             try:
-                message = resp.json().get("error", resp.text)
+                message = str(resp.json().get("error", resp.text))
             except ValueError:
                 message = resp.text
-            raise AIError(f"Ollama error {resp.status_code}: {message[:300]}")
+            # A missing model is a 404 that names the model; a wrong URL path is a plain 404 page.
+            if resp.status_code == 404 and "model" in message.lower():
+                raise AIError(f"Ollama model '{self.model}' is not installed. Run:  ollama pull {self.model}")
+            hint = f" (check the Ollama URL in Settings: {self.base_url})" if resp.status_code == 404 else ""
+            raise AIError(f"Ollama error {resp.status_code}: {message[:300]}{hint}")
         text = resp.json().get("message", {}).get("content", "")
         return parse_listing(text, language)
 
@@ -59,4 +59,15 @@ class OllamaProvider(Provider):
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise self._not_running(exc) from None
-        return sorted(m.get("name", "") for m in resp.json().get("models", []) if m.get("name"))
+        names = sorted(m.get("name", "") for m in resp.json().get("models", []) if m.get("name"))
+        return [n for n in names if self._sees_images(n)]
+
+    def _sees_images(self, model: str) -> bool:
+        """True unless Ollama reports the model's capabilities and 'vision' isn't one of them
+        (older Ollama versions don't report capabilities, so their models are all kept)."""
+        try:
+            resp = self.http.post(f"{self.base_url}/api/show", json={"model": model}, timeout=10)
+            capabilities = resp.json().get("capabilities") if resp.status_code == 200 else None
+        except (requests.RequestException, ValueError, AttributeError):
+            return True
+        return capabilities is None or "vision" in capabilities
